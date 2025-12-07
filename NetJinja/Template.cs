@@ -88,6 +88,9 @@ public sealed class Template
         var ast = parser.Parse();
 
         var compiled = new CompiledTemplate(ast);
+        // Estimate output size based on template characteristics
+        var hasLoop = source.Contains("{% for", StringComparison.Ordinal);
+        compiled.EstimatedOutputSize = hasLoop ? 4096 : Math.Max(128, source.Length * 2);
 
         // Collect blocks and check for extends
         CollectTemplateInfo(ast.Body, compiled);
@@ -151,7 +154,7 @@ public sealed class Template
             return RenderWithInheritance(context);
         }
 
-        var renderer = new Renderer(context);
+        var renderer = new Renderer(context, CompiledTemplate.EstimatedOutputSize);
         return renderer.Render(CompiledTemplate.Ast);
     }
 
@@ -193,7 +196,7 @@ public sealed class Template
         }
 
         // Render the root parent with block overrides
-        var renderer = new Renderer(context);
+        var renderer = new Renderer(context, currentParent.EstimatedOutputSize);
         return renderer.Render(currentParent.Ast, blockOverrides);
     }
 

@@ -22,10 +22,10 @@ public sealed class Renderer
     private readonly Dictionary<string, MacroStatement> _macros = new();
     private readonly Stack<Dictionary<string, BlockStatement>> _blockStack = new();
 
-    public Renderer(RenderContext context)
+    public Renderer(RenderContext context, int estimatedOutputSize = 256)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
-        _output = new StringBuilder(4096);
+        _output = new StringBuilder(estimatedOutputSize);
         _autoEscape = context.Environment.AutoEscape;
     }
 
@@ -368,9 +368,10 @@ public sealed class Renderer
         try
         {
             var template = _context.Environment.GetTemplate(templateName);
+            var estimatedSize = template.CompiledTemplate.EstimatedOutputSize;
             var includeRenderer = stmt.WithContext
-                ? new Renderer(_context)
-                : new Renderer(new RenderContext(_context.Environment));
+                ? new Renderer(_context, estimatedSize)
+                : new Renderer(new RenderContext(_context.Environment), estimatedSize);
 
             var result = includeRenderer.Render(template.CompiledTemplate.Ast);
             _output.Append(result);

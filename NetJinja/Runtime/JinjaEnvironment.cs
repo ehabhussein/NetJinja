@@ -264,6 +264,7 @@ public sealed class CompiledTemplate
     public NetJinja.Ast.TemplateNode Ast { get; }
     public string? ExtendsTemplate { get; set; }
     public Dictionary<string, NetJinja.Ast.BlockStatement> Blocks { get; } = new();
+    public int EstimatedOutputSize { get; set; } = 256;
 
     public CompiledTemplate(NetJinja.Ast.TemplateNode ast)
     {

@@ -9,7 +9,7 @@
 
     <!-- NuGet Package Configuration -->
     <PackageId>NetJinja</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Authors>ehabhussein</Authors>
     <Description>A high-performance, native Jinja2-compatible template engine for .NET. Fast, stable, and feature-complete.</Description>
     <PackageTags>jinja;jinja2;template;templating;razor-alternative;llm;prompt</PackageTags>
