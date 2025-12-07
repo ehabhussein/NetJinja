@@ -25,6 +25,9 @@ public sealed class Lexer
     private readonly string _commentStart;
     private readonly string _commentEnd;
 
+    // Flag to trim leading whitespace from next text token
+    private bool _trimNextText;
+
     // Keyword lookup for fast matching
     private static readonly Dictionary<string, TokenType> Keywords = new(StringComparer.Ordinal)
     {
@@ -109,6 +112,13 @@ public sealed class Lexer
             if (TryMatchDelimiter(_blockStart, TokenType.BlockStart, out var blockStart))
             {
                 tokens.Add(blockStart);
+
+                // Check for raw block - needs special handling
+                if (TryParseRawBlock(tokens))
+                {
+                    continue;
+                }
+
                 TokenizeExpression(tokens, _blockEnd, TokenType.BlockEnd);
                 continue;
             }
@@ -130,6 +140,19 @@ public sealed class Lexer
         var startLine = _line;
         var startColumn = _column;
         var startPos = _position;
+
+        // If previous tag ended with -, skip leading whitespace
+        if (_trimNextText)
+        {
+            _trimNextText = false;
+            while (_position < _length && char.IsWhiteSpace(Current))
+            {
+                Advance();
+            }
+            startPos = _position;
+            startLine = _line;
+            startColumn = _column;
+        }
 
         while (_position < _length)
         {
@@ -156,11 +179,12 @@ public sealed class Lexer
         {
             trimStart = true;
             Advance();
-            // Trim trailing whitespace from previous text token
-            if (tokens.Count > 0 && tokens[^1].Type == TokenType.Text)
+            // Trim trailing whitespace from the text token before the block start
+            // tokens[^1] is the BlockStart/VariableStart, so we need [^2] for the text
+            if (tokens.Count >= 2 && tokens[^2].Type == TokenType.Text)
             {
-                var lastToken = tokens[^1];
-                tokens[^1] = lastToken with { Value = lastToken.Value.TrimEnd() };
+                var textToken = tokens[^2];
+                tokens[^2] = textToken with { Value = textToken.Value.TrimEnd() };
             }
         }
 
@@ -179,13 +203,16 @@ public sealed class Lexer
             // Check for end delimiter with optional whitespace trimming
             if (Current == '-' && LookaheadMatch("-" + endDelimiter))
             {
-                // Trim whitespace version
+                // Trim whitespace version - set flag to trim leading whitespace from next text
                 Advance(); // skip -
                 if (LookaheadMatch(endDelimiter))
                 {
+                    var line = _line;
+                    var col = _column;
                     _position += endDelimiter.Length;
                     UpdatePosition(endDelimiter);
-                    tokens.Add(new Token(endTokenType, "-" + endDelimiter, _line, _column));
+                    tokens.Add(new Token(endTokenType, "-" + endDelimiter, line, col));
+                    _trimNextText = true; // Trim leading whitespace from next text token
                     return;
                 }
                 _position--; // backtrack if not actually end
@@ -473,6 +500,152 @@ public sealed class Lexer
                 _column++;
             }
         }
+    }
+
+    /// <summary>
+    /// Tries to parse a raw block. Returns true if this was a raw block.
+    /// Raw blocks preserve content exactly as-is until {% endraw %}.
+    /// </summary>
+    private bool TryParseRawBlock(List<Token> tokens)
+    {
+        // Save position in case this isn't a raw block
+        var savedPos = _position;
+        var savedLine = _line;
+        var savedColumn = _column;
+
+        // Handle optional whitespace control dash
+        if (_position < _length && Current == '-')
+        {
+            Advance();
+        }
+
+        SkipWhitespace();
+
+        // Check if this is "raw"
+        if (!LookaheadMatch("raw"))
+        {
+            // Not a raw block, restore position
+            _position = savedPos;
+            _line = savedLine;
+            _column = savedColumn;
+            return false;
+        }
+
+        // Check it's actually the keyword "raw" and not "rawdata" or similar
+        var afterRaw = _position + 3;
+        if (afterRaw < _length && (char.IsLetterOrDigit(_source[afterRaw]) || _source[afterRaw] == '_'))
+        {
+            _position = savedPos;
+            _line = savedLine;
+            _column = savedColumn;
+            return false;
+        }
+
+        // It's a raw block! Consume "raw"
+        var rawLine = _line;
+        var rawColumn = _column;
+        _position += 3;
+        _column += 3;
+
+        tokens.Add(new Token(TokenType.Raw, "raw", rawLine, rawColumn));
+
+        SkipWhitespace();
+
+        // Handle optional whitespace control dash before %}
+        if (_position < _length && Current == '-' && LookaheadMatch("-" + _blockEnd))
+        {
+            Advance();
+        }
+
+        // Consume %}
+        if (!LookaheadMatch(_blockEnd))
+        {
+            throw new LexerException($"Expected '{_blockEnd}' after 'raw'", _line, _column);
+        }
+        var endLine = _line;
+        var endColumn = _column;
+        _position += _blockEnd.Length;
+        UpdatePosition(_blockEnd);
+        tokens.Add(new Token(TokenType.BlockEnd, _blockEnd, endLine, endColumn));
+
+        // Now read raw content until {% endraw %}
+        var rawContentStart = _position;
+        var rawContentLine = _line;
+        var rawContentColumn = _column;
+        var endrawPattern = _blockStart + " endraw " + _blockEnd;
+        var endrawPatternTight = _blockStart + "endraw" + _blockEnd;
+        var endrawPatternDash = _blockStart + "- endraw " + _blockEnd;
+        var endrawPatternDashEnd = _blockStart + " endraw -" + _blockEnd;
+
+        while (_position < _length)
+        {
+            if (LookaheadMatch(_blockStart))
+            {
+                // Check for various endraw patterns
+                var remaining = _source.AsSpan(_position);
+
+                // Try to match {% endraw %} with various whitespace combinations
+                var endrawStart = _position;
+                var tempPos = _position + _blockStart.Length;
+
+                // Skip optional -
+                if (tempPos < _length && _source[tempPos] == '-') tempPos++;
+
+                // Skip whitespace
+                while (tempPos < _length && char.IsWhiteSpace(_source[tempPos])) tempPos++;
+
+                // Check for "endraw"
+                if (tempPos + 6 <= _length && _source.AsSpan(tempPos, 6).SequenceEqual("endraw".AsSpan()))
+                {
+                    tempPos += 6;
+
+                    // Skip whitespace
+                    while (tempPos < _length && char.IsWhiteSpace(_source[tempPos])) tempPos++;
+
+                    // Skip optional -
+                    if (tempPos < _length && _source[tempPos] == '-') tempPos++;
+
+                    // Check for %}
+                    if (tempPos + _blockEnd.Length <= _length &&
+                        _source.AsSpan(tempPos, _blockEnd.Length).SequenceEqual(_blockEnd.AsSpan()))
+                    {
+                        // Found endraw! Capture the raw content
+                        var rawContent = _source.Substring(rawContentStart, endrawStart - rawContentStart);
+                        if (rawContent.Length > 0)
+                        {
+                            tokens.Add(new Token(TokenType.Text, rawContent, rawContentLine, rawContentColumn));
+                        }
+
+                        // Add {% endraw %} tokens
+                        tokens.Add(new Token(TokenType.BlockStart, _blockStart, _line, _column));
+                        tokens.Add(new Token(TokenType.Endraw, "endraw", _line, _column));
+                        tokens.Add(new Token(TokenType.BlockEnd, _blockEnd, _line, _column));
+
+                        // Move position past {% endraw %}
+                        _position = tempPos + _blockEnd.Length;
+                        // Update line/column tracking
+                        for (int i = endrawStart; i < _position && i < _length; i++)
+                        {
+                            if (_source[i] == '\n')
+                            {
+                                _line++;
+                                _column = 1;
+                            }
+                            else
+                            {
+                                _column++;
+                            }
+                        }
+
+                        return true;
+                    }
+                }
+            }
+
+            Advance();
+        }
+
+        throw new LexerException("Unclosed raw block, expected '{% endraw %}'", rawContentLine, rawContentColumn);
     }
 }
 

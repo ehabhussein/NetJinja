@@ -236,16 +236,31 @@ public static class Jinja
     /// <summary>
     /// Renders a template string with the given variables.
     /// </summary>
-    public static string Render(string template, IDictionary<string, object?>? variables = null)
+    public static string Render(string template, IDictionary<string, object?>? variables)
     {
         return DefaultEnvironment.FromString(template).Render(variables);
     }
 
     /// <summary>
-    /// Renders a template string with an anonymous object as variables.
+    /// Renders a template string with no variables.
+    /// </summary>
+    public static string Render(string template)
+    {
+        return DefaultEnvironment.FromString(template).Render((IDictionary<string, object?>?)null);
+    }
+
+    /// <summary>
+    /// Renders a template string with an anonymous object or Dictionary as variables.
+    /// For Dictionary&lt;string, object&gt;, cast to IDictionary&lt;string, object?&gt; to avoid warnings.
     /// </summary>
     public static string Render(string template, object model)
     {
+        // Handle Dictionary<string, object> specially to avoid nullability warnings
+        if (model is IDictionary<string, object> dict)
+        {
+            var nullableDict = dict.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value);
+            return DefaultEnvironment.FromString(template).Render(nullableDict);
+        }
         return DefaultEnvironment.FromString(template).Render(model);
     }
 
