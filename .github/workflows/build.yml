@@ -26,7 +26,15 @@ jobs:
       run: dotnet build --no-restore --configuration Release
 
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal
+      run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --results-directory ./TestResults
+
+    - name: Publish Test Results
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Test Results
+        path: ./TestResults/*.trx
+        reporter: dotnet-trx
 
     - name: Pack
       run: dotnet pack NetJinja/NetJinja.csproj --no-build --configuration Release --output ./artifacts
