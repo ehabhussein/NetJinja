@@ -24,9 +24,13 @@ public sealed class Lexer
     private readonly string _blockEnd;
     private readonly string _commentStart;
     private readonly string _commentEnd;
+    private readonly bool _trimBlocks;
+    private readonly bool _lstripBlocks;
 
-    // Flag to trim leading whitespace from next text token
+    // Flag to trim leading whitespace from next text token (for -%})
     private bool _trimNextText;
+    // Flag to trim only the first newline from next text token (for TrimBlocks)
+    private bool _trimFirstNewline;
 
     // Keyword lookup for fast matching
     private static readonly Dictionary<string, TokenType> Keywords = new(StringComparer.Ordinal)
@@ -84,6 +88,8 @@ public sealed class Lexer
         _blockEnd = options.BlockEnd;
         _commentStart = options.CommentStart;
         _commentEnd = options.CommentEnd;
+        _trimBlocks = options.TrimBlocks;
+        _lstripBlocks = options.LstripBlocks;
     }
 
     /// <summary>
@@ -111,6 +117,17 @@ public sealed class Lexer
 
             if (TryMatchDelimiter(_blockStart, TokenType.BlockStart, out var blockStart))
             {
+                // LstripBlocks: strip leading whitespace from the start of the line to the block tag
+                if (_lstripBlocks && tokens.Count > 0 && tokens[^1].Type == TokenType.Text)
+                {
+                    var prevTextToken = tokens[^1];
+                    var strippedValue = StripTrailingLineWhitespace(prevTextToken.Value);
+                    if (strippedValue != prevTextToken.Value)
+                    {
+                        tokens[^1] = prevTextToken with { Value = strippedValue };
+                    }
+                }
+
                 tokens.Add(blockStart);
 
                 // Check for raw block - needs special handling
@@ -141,10 +158,11 @@ public sealed class Lexer
         var startColumn = _column;
         var startPos = _position;
 
-        // If previous tag ended with -, skip leading whitespace
+        // If previous tag ended with -, skip all leading whitespace
         if (_trimNextText)
         {
             _trimNextText = false;
+            _trimFirstNewline = false; // -%} takes precedence
             while (_position < _length && char.IsWhiteSpace(Current))
             {
                 Advance();
@@ -152,6 +170,29 @@ public sealed class Lexer
             startPos = _position;
             startLine = _line;
             startColumn = _column;
+        }
+        // If TrimBlocks is active, skip only the first newline
+        else if (_trimFirstNewline)
+        {
+            _trimFirstNewline = false;
+            if (_position < _length && Current == '\n')
+            {
+                Advance();
+                startPos = _position;
+                startLine = _line;
+                startColumn = _column;
+            }
+            else if (_position < _length && Current == '\r')
+            {
+                Advance();
+                if (_position < _length && Current == '\n')
+                {
+                    Advance();
+                }
+                startPos = _position;
+                startLine = _line;
+                startColumn = _column;
+            }
         }
 
         while (_position < _length)
@@ -225,6 +266,11 @@ public sealed class Lexer
                 _position += endDelimiter.Length;
                 UpdatePosition(endDelimiter);
                 tokens.Add(new Token(endTokenType, endDelimiter, line, col));
+                // Set TrimBlocks flag for block tags (not variable tags)
+                if (_trimBlocks && endTokenType == TokenType.BlockEnd)
+                {
+                    _trimFirstNewline = true;
+                }
                 return;
             }
 
@@ -466,6 +512,33 @@ public sealed class Lexer
         return _source.AsSpan(_position, s.Length).SequenceEqual(s.AsSpan());
     }
 
+    /// <summary>
+    /// Strips trailing whitespace from the last line if it contains only spaces/tabs.
+    /// Used for LstripBlocks support.
+    /// </summary>
+    private static string StripTrailingLineWhitespace(string text)
+    {
+        if (text.Length == 0) return text;
+
+        // Find the last newline
+        var lastNewlineIndex = text.LastIndexOf('\n');
+
+        // Check if everything after the last newline (or from start if no newline) is only spaces/tabs
+        var startOfLine = lastNewlineIndex + 1;
+        for (int i = startOfLine; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c != ' ' && c != '\t')
+            {
+                // Non-whitespace character found, don't strip
+                return text;
+            }
+        }
+
+        // Everything after the last newline is whitespace, strip it
+        return text.Substring(0, startOfLine);
+    }
+
     private char Current => _source[_position];
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -660,6 +733,16 @@ public sealed class LexerOptions
     public string BlockEnd { get; init; } = "%}";
     public string CommentStart { get; init; } = "{#";
     public string CommentEnd { get; init; } = "#}";
+
+    /// <summary>
+    /// Remove the first newline after a block tag.
+    /// </summary>
+    public bool TrimBlocks { get; init; } = false;
+
+    /// <summary>
+    /// Strip leading whitespace and tabs from the start of a line to a block tag.
+    /// </summary>
+    public bool LstripBlocks { get; init; } = false;
 
     public static LexerOptions Default { get; } = new();
 }

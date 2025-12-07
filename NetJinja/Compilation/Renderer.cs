@@ -262,26 +262,44 @@ public sealed class Renderer
     {
         // Check for override in parent templates
         BlockStatement? effectiveBlock = block;
+        BlockStatement? parentBlock = null;
 
         foreach (var overrides in _blockStack)
         {
             if (overrides.TryGetValue(block.Name, out var overrideBlock))
             {
                 effectiveBlock = overrideBlock;
+                parentBlock = block; // The original block is the parent
                 break;
             }
         }
 
-        if (block.Scoped)
+        // Push parent block for super() support
+        if (parentBlock != null)
         {
-            using (_context.PushScope())
+            _context.PushParentBlock(parentBlock);
+        }
+
+        try
+        {
+            if (block.Scoped)
+            {
+                using (_context.PushScope())
+                {
+                    RenderStatements(effectiveBlock.Body);
+                }
+            }
+            else
             {
                 RenderStatements(effectiveBlock.Body);
             }
         }
-        else
+        finally
         {
-            RenderStatements(effectiveBlock.Body);
+            if (parentBlock != null)
+            {
+                _context.PopParentBlock();
+            }
         }
     }
 
@@ -408,13 +426,33 @@ public sealed class Renderer
 
     private object? EvaluateCall(CallExpression expr)
     {
-        var callee = Evaluate(expr.Callee);
+        // Check for super() call
+        if (expr.Callee is NameExpression superName && superName.Name == "super" && expr.Arguments.Count == 0)
+        {
+            return EvaluateSuper();
+        }
 
         // Check if it's a macro
         if (expr.Callee is NameExpression name && _macros.TryGetValue(name.Name, out var macro))
         {
             return CallMacro(macro, expr.Arguments, expr.KeywordArguments);
         }
+
+        // Handle method calls on objects (e.g., loop.cycle('odd', 'even'))
+        if (expr.Callee is GetAttrExpression getAttr)
+        {
+            var obj = Evaluate(getAttr.Object);
+            if (obj != null)
+            {
+                var methodResult = TryCallMethod(obj, getAttr.Attribute, expr.Arguments, expr.Line, expr.Column);
+                if (methodResult.HasValue)
+                {
+                    return methodResult.Value;
+                }
+            }
+        }
+
+        var callee = Evaluate(expr.Callee);
 
         // Regular callable
         if (callee is Delegate del)
@@ -430,6 +468,61 @@ public sealed class Renderer
         }
 
         throw new RenderException($"'{callee}' is not callable", expr.Line, expr.Column);
+    }
+
+    private object? EvaluateSuper()
+    {
+        var parentBlock = _context.CurrentParentBlock;
+        if (parentBlock == null)
+        {
+            return ""; // No parent block
+        }
+
+        // Render the parent block body
+        var savedOutput = _output.ToString();
+        _output.Clear();
+        RenderStatements(parentBlock.Body);
+        var result = _output.ToString();
+        _output.Clear();
+        _output.Append(savedOutput);
+
+        return new HtmlString(result);
+    }
+
+    private (bool HasValue, object? Value) TryCallMethod(object obj, string methodName, IReadOnlyList<Expression> argExprs, int line, int column)
+    {
+        var type = obj.GetType();
+        var args = argExprs.Select(Evaluate).ToArray();
+
+        // Find method by name (case-insensitive)
+        var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+            .Where(m => m.Name.Equals(methodName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        foreach (var method in methods)
+        {
+            var parameters = method.GetParameters();
+
+            // Handle params array
+            if (parameters.Length == 1 && parameters[0].IsDefined(typeof(ParamArrayAttribute)))
+            {
+                var elementType = parameters[0].ParameterType.GetElementType()!;
+                var paramsArray = Array.CreateInstance(elementType, args.Length);
+                for (int i = 0; i < args.Length; i++)
+                {
+                    paramsArray.SetValue(args[i], i);
+                }
+                return (true, method.Invoke(obj, new object[] { paramsArray }));
+            }
+
+            // Direct match
+            if (parameters.Length == args.Length)
+            {
+                return (true, method.Invoke(obj, args));
+            }
+        }
+
+        return (false, null);
     }
 
     private object? CallMacro(MacroStatement macro, IReadOnlyList<Expression> args, IReadOnlyDictionary<string, Expression> kwargs)

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Dynamic;
 using System.Runtime.CompilerServices;
+using NetJinja.Ast;
 
 namespace NetJinja.Runtime;
 
@@ -33,9 +34,11 @@ public sealed class RenderContext
     private Scope _scope;
     private readonly JinjaEnvironment _environment;
     private readonly Stack<LoopContext> _loopStack = new();
+    private readonly Stack<BlockStatement> _parentBlockStack = new();
 
     internal JinjaEnvironment Environment => _environment;
     internal LoopContext? CurrentLoop => _loopStack.Count > 0 ? _loopStack.Peek() : null;
+    internal BlockStatement? CurrentParentBlock => _parentBlockStack.Count > 0 ? _parentBlockStack.Peek() : null;
 
     public RenderContext(JinjaEnvironment environment, IDictionary<string, object?>? variables = null)
     {
@@ -101,6 +104,16 @@ public sealed class RenderContext
     /// Pops the current loop context.
     /// </summary>
     internal void PopLoop() => _loopStack.Pop();
+
+    /// <summary>
+    /// Pushes a parent block onto the stack for super() support.
+    /// </summary>
+    internal void PushParentBlock(BlockStatement block) => _parentBlockStack.Push(block);
+
+    /// <summary>
+    /// Pops the current parent block.
+    /// </summary>
+    internal void PopParentBlock() => _parentBlockStack.Pop();
 
     private sealed class ScopeGuard : IDisposable
     {

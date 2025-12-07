@@ -35,6 +35,7 @@ public static class BuiltinFilters
         env.Filters["rjust"] = Rjust;
         env.Filters["indent"] = Indent;
         env.Filters["format"] = Format;
+        env.Filters["wordcount"] = (v, a, k, c) => WordCount(ToString(v));
 
         // Collection filters
         env.Filters["length"] = Length;
@@ -202,6 +203,12 @@ public static class BuiltinFilters
         }
 
         return string.Join(wrapString, lines);
+    }
+
+    private static int WordCount(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0;
+        return s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
     }
 
     private static object? Center(object? value, object?[] args, IDictionary<string, object?> kwargs, RenderContext ctx)

@@ -67,7 +67,21 @@ public sealed class Template
     /// </summary>
     private CompiledTemplate Compile(string source, string? name)
     {
-        var lexer = new Lexer(source, _environment.LexerOptions);
+        // Combine base lexer options with environment settings
+        var baseOptions = _environment.LexerOptions;
+        var lexerOptions = new LexerOptions
+        {
+            VariableStart = baseOptions.VariableStart,
+            VariableEnd = baseOptions.VariableEnd,
+            BlockStart = baseOptions.BlockStart,
+            BlockEnd = baseOptions.BlockEnd,
+            CommentStart = baseOptions.CommentStart,
+            CommentEnd = baseOptions.CommentEnd,
+            TrimBlocks = _environment.TrimBlocks,
+            LstripBlocks = _environment.LstripBlocks
+        };
+
+        var lexer = new Lexer(source, lexerOptions);
         var tokens = lexer.Tokenize();
 
         var parser = new Parser(tokens, name);
