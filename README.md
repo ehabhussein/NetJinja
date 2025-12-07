@@ -3,6 +3,7 @@
 A high-performance, native Jinja2-compatible template engine for .NET 10. Fast, stable, and feature-complete.
 
 [![NuGet](https://img.shields.io/nuget/v/NetJinja.svg)](https://www.nuget.org/packages/NetJinja/)
+[![GitHub Release](https://img.shields.io/github/v/release/ehabhussein/NetJinja)](https://github.com/ehabhussein/NetJinja/releases)
 [![Build](https://github.com/ehabhussein/NetJinja/actions/workflows/build.yml/badge.svg)](https://github.com/ehabhussein/NetJinja/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
