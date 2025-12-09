@@ -263,7 +263,7 @@ public static class Jinja
     /// </summary>
     public static string Render(string template)
     {
-        return DefaultEnvironment.FromString(template).Render((IDictionary<string, object?>?)null);
+        return DefaultEnvironment.FromString(template).Render(null);
     }
 
     /// <summary>
